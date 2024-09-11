@@ -29,8 +29,8 @@ client = Client()
 # Словарь для хранения активных викторин по каналам
 active_quizzes = {}
 
-# Id сообщения с текущим вопросом
-msg_reaction_id = None
+# Id сообщений для учета реакция по викторинам
+msg_reaction_dict = {}
 
 # def get_question(client, topic):
 #     request_text = (
@@ -142,8 +142,7 @@ class QuizView(discord.ui.View):
         self.message = await ctx.send(content, view=self)
 
         # Сохраняем ID сообщения с реакциями
-        global msg_reaction_id
-        msg_reaction_id = self.message.id
+        msg_reaction_dict[self] = self.message.id
 
         # Добавляем реакции-эмодзи для голосования
         await self._add_emoji_reaction()
@@ -182,8 +181,7 @@ class QuizView(discord.ui.View):
             self.message = await interaction.followup.send(content=content, view=self)
 
             # Сохраняем ID сообщения с реакциями
-            global msg_reaction_id
-            msg_reaction_id = self.message.id
+            msg_reaction_dict[self] = self.message.id
 
             # Сбрасываем данные голосов
             self.votes = {"1️⃣": [], "2️⃣": [], "3️⃣": [], "4️⃣": []}
@@ -199,8 +197,8 @@ class QuizView(discord.ui.View):
 
     async def correct_answer(self, interaction: discord.Interaction):
 
-        global msg_reaction_id
-        msg_reaction_id = None
+        # Удаляем ID сообщения с реакциями
+        del msg_reaction_dict[self]
 
         # Очищаем кнопки из предыдущего сообщения
         await self._remove_buttons()
@@ -271,11 +269,11 @@ class QuizView(discord.ui.View):
 # Обработчик событий на добавление реакций для подсчета голосов
 @bot.event
 async def on_reaction_add(reaction, user):
-    # Проверяем, что реакция добавлена к текущему вопросу и что это не бот добавил реакцию
-    if not user.bot and reaction.message.id == msg_reaction_id:
-        # Ищем активную викторину для данного канала
-        quiz_view = active_quizzes.get(reaction.message.channel.id)
-        if quiz_view:
+    # Ищем активную викторину для данного канала
+    quiz_view = active_quizzes.get(reaction.message.channel.id)
+    if quiz_view:
+        # Проверяем, что реакция добавлена к текущему вопросу и что это не бот добавил реакцию
+        if not user.bot and reaction.message.id == msg_reaction_dict.get(quiz_view):
             # Проверяем, если пользователь уже голосовал
             if user.id in quiz_view.voted_users:
                 # Если реакция другая, удаляем новую реакцию
@@ -293,19 +291,22 @@ async def on_reaction_add(reaction, user):
 # Обработчик событий на удаление реакций
 @bot.event
 async def on_reaction_remove(reaction, user):
-    if not user.bot and reaction.message.id == msg_reaction_id:
-        # Проверяем, есть ли активная викторина для текущего канала
-        quiz_view = active_quizzes.get(reaction.message.channel.id)
+    # Ищем активную викторину для данного канала
+    quiz_view = active_quizzes.get(reaction.message.channel.id)
+    if quiz_view:
+        if not user.bot and reaction.message.id == msg_reaction_dict.get(quiz_view):
+            # Проверяем, есть ли активная викторина для текущего канала
+            quiz_view = active_quizzes.get(reaction.message.channel.id)
 
-        # Убедимся, что викторина существует и пользователь голосовал
-        if quiz_view and user.id in quiz_view.voted_users:
-            # Удаляем голос пользователя из списка голосов
-            if quiz_view.voted_users[user.id] == reaction.emoji:
-                # Удаляем пользователя из списка проголосовавших за конкретную реакцию
-                quiz_view.votes[reaction.emoji].remove(user.id)  # Удаляем по значению
-                # Удаляем запись о голосе пользователя
-                del quiz_view.voted_users[user.id]
-                print("Удаление реакции")
+            # Убедимся, что викторина существует и пользователь голосовал
+            if quiz_view and user.id in quiz_view.voted_users:
+                # Удаляем голос пользователя из списка голосов
+                if quiz_view.voted_users[user.id] == reaction.emoji:
+                    # Удаляем пользователя из списка проголосовавших за конкретную реакцию
+                    quiz_view.votes[reaction.emoji].remove(user.id)  # Удаляем по значению
+                    # Удаляем запись о голосе пользователя
+                    del quiz_view.voted_users[user.id]
+                    print("Удаление реакции")
 
 
 # Команда для запуска викторины
