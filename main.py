@@ -127,11 +127,9 @@ class QuizView(discord.ui.View):
 
         self.msg_content = content
 
-        # Очищаем view от предыдущих кнопок
-        self.clear_items()
-
         # Динамически добавляем кнопки, которые хотим отобразить
         self.add_item(self.correct_answer_button)
+        self.add_item(self.end_quiz_button)
 
         self.message = await ctx.send(content, view=self)
 
@@ -149,12 +147,6 @@ class QuizView(discord.ui.View):
         try:
             # Делаем defer взаимодействия, чтобы предотвратить таймауты
             await interaction.response.defer()
-
-            # Удаляем кнопки из предыдущего сообщения
-            self.clear_items()
-            await interaction.followup.edit_message(
-                self.message.id, content=self.msg_content, view=self
-            )
 
             # Получаем следующий вопрос
             self.current_question = get_question()
@@ -207,7 +199,6 @@ class QuizView(discord.ui.View):
                 self.user_correct_answers[user] = 1
 
         # Очищаем view и добавляем новые кнопки
-        self.clear_items()
         self.add_item(self.next_question_button)
         self.add_item(self.end_quiz_button)
 
@@ -239,6 +230,7 @@ class QuizView(discord.ui.View):
         )  # Сброс прав
 
     async def _remove_buttons(self):
+        self.clear_items()
         await self.message.edit(content=self.msg_content, view=None)
 
     async def _add_emoji_reaction(self):
