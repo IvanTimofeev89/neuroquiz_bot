@@ -29,7 +29,7 @@ client = Client()
 # Словарь для хранения активных викторин по каналам
 active_quizzes = {}
 
-# Id сообщений для учета реакция по викторинам
+# Id сообщения для учета голосов участников по викторинам
 msg_reaction_dict = {}
 
 # def get_question(client, topic):
@@ -123,13 +123,7 @@ class QuizView(discord.ui.View):
 
     async def start_question(self, ctx):
         self.current_question = get_question()
-        content = (
-            f"Вопрос: {self.current_question['question']}\n"
-            f"1️⃣ {self.current_question['answer_1']}\n"
-            f"2️⃣ {self.current_question['answer_2']}\n"
-            f"3️⃣ {self.current_question['answer_3']}\n"
-            f"4️⃣ {self.current_question['answer_4']}\n"
-        )
+        content = await self._generate_content()
 
         self.msg_content = content
 
@@ -164,13 +158,7 @@ class QuizView(discord.ui.View):
 
             # Получаем следующий вопрос
             self.current_question = get_question()
-            content = (
-                f"Вопрос: {self.current_question['question']}\n"
-                f"1️⃣ {self.current_question['answer_1']}\n"
-                f"2️⃣ {self.current_question['answer_2']}\n"
-                f"3️⃣ {self.current_question['answer_3']}\n"
-                f"4️⃣ {self.current_question['answer_4']}\n"
-            )
+            content = await self._generate_content()
 
             # Динамически добавляем кнопки, которые хотим отобразить
             self.add_item(self.correct_answer_button)
@@ -226,7 +214,6 @@ class QuizView(discord.ui.View):
         content = f"Правильный ответ: {correct_answer}"
         self.msg_content = content
 
-        # Используем followup.send вместо response.send_message для сохранения объекта сообщения
         self.message = await interaction.followup.send(content=content, view=self)
 
     async def end_quiz(self, interaction: discord.Interaction):
@@ -243,8 +230,6 @@ class QuizView(discord.ui.View):
         else:
             await interaction.response.send_message("Викторина закончена без победителя!")
 
-        await interaction.message.edit(view=self)
-
         # Удаление викторины из активных
         active_quizzes.pop(interaction.channel.id, None)
 
@@ -254,9 +239,6 @@ class QuizView(discord.ui.View):
         )  # Сброс прав
 
     async def _remove_buttons(self):
-        # Очищаем кнопки из предыдущего сообщения
-        self.clear_items()
-        # Удаляем все кнопки из сообщения
         await self.message.edit(content=self.msg_content, view=None)
 
     async def _add_emoji_reaction(self):
@@ -264,6 +246,15 @@ class QuizView(discord.ui.View):
         await self.message.add_reaction("2️⃣")
         await self.message.add_reaction("3️⃣")
         await self.message.add_reaction("4️⃣")
+
+    async def _generate_content(self):
+        return (
+            f"Вопрос: {self.current_question['question']}\n"
+            f"1️⃣ {self.current_question['answer_1']}\n"
+            f"2️⃣ {self.current_question['answer_2']}\n"
+            f"3️⃣ {self.current_question['answer_3']}\n"
+            f"4️⃣ {self.current_question['answer_4']}\n"
+        )
 
 
 # Обработчик событий на добавление реакций для подсчета голосов
@@ -317,7 +308,7 @@ async def start(ctx):
 
     # Функция для проверки ответа
     def check(msg):
-        return msg.channel == ctx.channel
+        return not msg.author.bot and msg.channel == ctx.channel
 
     try:
         # Ожидаем ответа пользователя
