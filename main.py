@@ -65,9 +65,15 @@ class QuizView(discord.ui.View):
         self.end_quiz_button.callback = self.end_quiz
 
     async def start_question(self, ctx):
-        self.current_question = get_gpt_question(self.quiz_topic)
-        content = await self._generate_content()
+        try:
+            self.current_question = get_gpt_question(self.quiz_topic)
+        except Exception as e:
+            await ctx.send(f"Произошла ошибка: {e}.\nЗаканчиваем викторину")
+            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+            await self.end_quiz(ctx=ctx)
+            return
 
+        content = await self._generate_content()
         self.msg_content = content
 
         # Динамически добавляем кнопки, которые хотим отобразить
@@ -84,51 +90,50 @@ class QuizView(discord.ui.View):
 
     async def next_question(self, interaction: discord.Interaction):
 
+        # Делаем defer взаимодействия, чтобы предотвратить таймауты
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+
+        # Получаем следующий вопрос
+        try:
+            self.current_question = get_gpt_question(self.quiz_topic)
+            content = await self._generate_content()
+        except Exception as e:
+            await interaction.followup.send(f"Произошла ошибка: {e}.\nЗаканчиваем викторину")
+            await self.end_quiz(interaction=interaction)
+            return
+
         # Очищаем кнопки из предыдущего сообщения
         await self._remove_buttons()
 
-        try:
-            # Делаем defer взаимодействия, чтобы предотвратить таймауты
-            await interaction.response.defer()
+        # Динамически добавляем кнопки, которые хотим отобразить
+        self.add_item(self.correct_answer_button)
+        self.add_item(self.end_quiz_button)
 
-            # Получаем следующий вопрос
-            self.current_question = get_gpt_question(self.quiz_topic)
-            content = await self._generate_content()
+        self.msg_content = content
+        # Отправляем новое сообщение и сохраняем его
+        self.message = await interaction.followup.send(content=content, view=self)
 
-            # Динамически добавляем кнопки, которые хотим отобразить
-            self.add_item(self.correct_answer_button)
-            self.add_item(self.end_quiz_button)
+        # Сохраняем ID сообщения с реакциями
+        msg_reaction_dict[self] = self.message.id
 
-            self.msg_content = content
-            # Отправляем новое сообщение и сохраняем его
-            self.message = await interaction.followup.send(content=content, view=self)
+        # Сбрасываем данные голосов
+        self.votes = {"1️⃣": [], "2️⃣": [], "3️⃣": [], "4️⃣": []}
+        self.voted_users.clear()
 
-            # Сохраняем ID сообщения с реакциями
-            msg_reaction_dict[self] = self.message.id
-
-            # Сбрасываем данные голосов
-            self.votes = {"1️⃣": [], "2️⃣": [], "3️⃣": [], "4️⃣": []}
-            self.voted_users.clear()
-
-            # Добавляем реакции-эмодзи для голосования
-            await self._add_emoji_reaction()
-
-        except Exception as e:
-            # Логируем ошибку для отладки
-            print(f"Ошибка при обработке 'Следующий вопрос': {e}")
-            await interaction.followup.send("Произошла ошибка при переходе к следующему вопросу.")
+        # Добавляем реакции-эмодзи для голосования
+        await self._add_emoji_reaction()
 
     async def correct_answer(self, interaction: discord.Interaction):
+        # Делаем defer взаимодействия, чтобы предотвратить таймауты
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
         # Удаляем ID сообщения с реакциями
         del msg_reaction_dict[self]
 
         # Очищаем кнопки из предыдущего сообщения
         await self._remove_buttons()
-
-        # Делаем defer взаимодействия, чтобы предотвратить таймауты
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
         correct_answer_key = self.current_question["correct_answer"]
         correct_answer_content = self.current_question[correct_answer_key]
@@ -150,31 +155,48 @@ class QuizView(discord.ui.View):
 
         self.message = await interaction.followup.send(content=content, view=self)
 
-    async def end_quiz(self, interaction: discord.Interaction):
+    async def end_quiz(self, interaction: discord.Interaction = None, ctx=None):
 
         # Удаляем кнопки из предыдущего сообщения
         await self._remove_buttons()
+        if interaction:
+            if self.user_correct_answers:
+                winner_id = max(self.user_correct_answers, key=self.user_correct_answers.get)
+                winner = interaction.guild.get_member(winner_id)
+                await interaction.response.send_message(
+                    "Викторина закончена!" f" Победитель: {winner.mention} 🏆"
+                )
+            else:
+                await interaction.response.send_message("Викторина закончена без победителя!")
 
-        if self.user_correct_answers:
-            winner_id = max(self.user_correct_answers, key=self.user_correct_answers.get)
-            winner = interaction.guild.get_member(winner_id)
-            await interaction.response.send_message(
-                "Викторина закончена!" f" Победитель: {winner.mention} 🏆"
-            )
-        else:
-            await interaction.response.send_message("Викторина закончена без победителя!")
+            # Удаление викторины из активных
+            active_quizzes.pop(interaction.channel.id, None)
 
-        # Удаление викторины из активных
-        active_quizzes.pop(interaction.channel.id, None)
+            # Восстановление прав на отправку сообщений
+            await interaction.channel.set_permissions(
+                interaction.guild.default_role, send_messages=True
+            )  # Сброс прав
 
-        # Восстановление прав на отправку сообщений
-        await interaction.channel.set_permissions(
-            interaction.guild.default_role, send_messages=True
-        )  # Сброс прав
+        elif ctx:
+            if self.user_correct_answers:
+                winner_id = max(self.user_correct_answers, key=self.user_correct_answers.get)
+                winner = ctx.guild.get_member(winner_id)
+                await ctx.send(f"Викторина закончена!" f" Победитель: {winner.mention} 🏆")
+            else:
+                await ctx.send("Викторина закончена без победителя!")
+
+            # Удаление викторины из активных
+            active_quizzes.pop(ctx.channel.id, None)
+
+            # Восстановление прав на отправку сообщений
+            await ctx.channel.set_permissions(
+                ctx.guild.default_role, send_messages=True
+            )  # Сброс прав
 
     async def _remove_buttons(self):
         self.clear_items()
-        await self.message.edit(content=self.msg_content, view=None)
+        if self.message:
+            await self.message.edit(content=self.msg_content, view=None)
 
     async def _add_emoji_reaction(self):
         await self.message.add_reaction("1️⃣")
@@ -214,7 +236,6 @@ async def on_reaction_add(reaction, user):
                 if reaction.emoji in quiz_view.votes:
                     quiz_view.votes[reaction.emoji].append(user.id)
                     quiz_view.voted_users[user.id] = reaction.emoji  # Сохраняем голос пользователя
-                    print("Добавление реакции")
 
 
 # Обработчик событий на удаление реакций
@@ -235,7 +256,6 @@ async def on_reaction_remove(reaction, user):
                     quiz_view.votes[reaction.emoji].remove(user.id)  # Удаляем по значению
                     # Удаляем запись о голосе пользователя
                     del quiz_view.voted_users[user.id]
-                    print("Удаление реакции")
 
 
 # Команда для запуска викторины

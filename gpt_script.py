@@ -27,9 +27,9 @@ def get_gpt_question(topic):
                 "text": f"Придумай вопрос для викторины на тему: {topic} "
                 "и четыре варианта ответов. "
                 "В ответ отправь только JSON с полями, без других слов и пробелов"
-                "{'question': вопрос,'answer_1': ответ 1, "
-                "'answer_2': ответ 2, 'answer_3': ответ 3, "
-                "'answer_4': ответ 4, "
+                "{'question': 'вопрос','answer_1': 'ответ 1', "
+                "'answer_2': 'ответ 2', 'answer_3': 'ответ 3', "
+                "'answer_4': 'ответ 4', "
                 "'correct_answer': тут ключ правильного ответа "
                 "т.е. answer_1 или answer_2 или answer_3 или answer_4}",
             }
@@ -45,7 +45,9 @@ def get_gpt_question(topic):
                 {resp.status_code}, {resp.text}
             )
         )
+    print("Текст ответа" + resp.text)
     question, answer_1, answer_2, answer_3, answer_4, correct_answer = parse_gpt_response(resp.text)
+
     question_dict = {
         "question": question,
         "answer_1": answer_1,
@@ -59,11 +61,41 @@ def get_gpt_question(topic):
 
 
 def parse_gpt_response(gpt_text):
+
     gpt_text = gpt_text.replace("\n    ", "").replace("\n", "").replace("\\", "")
-    question = re.search(r"\"question\": \"(.*?)\"", gpt_text).group(1)
-    answer_1 = re.search(r"\"answer_1\": \"(.*?)\"", gpt_text).group(1)
-    answer_2 = re.search(r"\"answer_2\": \"(.*?)\"", gpt_text).group(1)
-    answer_3 = re.search(r"\"answer_3\": \"(.*?)\"", gpt_text).group(1)
-    answer_4 = re.search(r"\"answer_4\": \"(.*?)\"", gpt_text).group(1)
-    correct_answer = re.search(r"\"correct_answer\": \"(.*?)\"", gpt_text).group(1)
-    return question, answer_1, answer_2, answer_3, answer_4, correct_answer
+
+    question = re.search(r"\"question\": \"(.*?)\"", gpt_text)
+    answer_1 = re.search(r"\"answer_1\": \"(.*?)\"", gpt_text)
+    answer_2 = re.search(r"\"answer_2\": \"(.*?)\"", gpt_text)
+    answer_3 = re.search(r"\"answer_3\": \"(.*?)\"", gpt_text)
+    answer_4 = re.search(r"\"answer_4\": \"(.*?)\"", gpt_text)
+    correct_answer = re.search(r"\"correct_answer\": \"(.*?)\"", gpt_text)
+
+    print(
+        f"Вопрос: {question}\n"
+        f"Ответ 1: {answer_1}\n"
+        f"Ответ 2: {answer_2}\n"
+        f"Ответ 3: {answer_3}\n"
+        f"Ответ 4: {answer_4}\n"
+        f"Правильный ответ: {correct_answer}"
+    )
+
+    if question and answer_1 and answer_2 and answer_3 and answer_4 and correct_answer:
+        question = question.group(1)
+        answer_1 = answer_1.group(1)
+        answer_2 = answer_2.group(1)
+        answer_3 = answer_3.group(1)
+        answer_4 = answer_4.group(1)
+        correct_answer = correct_answer.group(1)
+        match correct_answer:
+            case "1":
+                correct_answer = "answer_1"
+            case "2":
+                correct_answer = "answer_2"
+            case "3":
+                correct_answer = "answer_3"
+            case "4":
+                correct_answer = "answer_4"
+
+        return question, answer_1, answer_2, answer_3, answer_4, correct_answer
+    raise ValueError("Ошибка парсинга ответа")
