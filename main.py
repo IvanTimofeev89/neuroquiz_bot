@@ -1,10 +1,11 @@
 import os
-import random
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from g4f.client import Client
+
+from gpt_script import get_gpt_question
 
 load_dotenv()
 
@@ -31,64 +32,6 @@ active_quizzes = {}
 
 # Id сообщения для учета голосов участников по викторинам
 msg_reaction_dict = {}
-
-# def get_question(client, topic):
-#     request_text = (
-#         f"Придумай вопрос для викторины на тему: {topic}, а также четыре варианта ответов. "
-#         + 'Ответ дай вида {"question": "вопрос", '
-#         '"answer_1": "ответ 1", '
-#         '"answer_2": "ответ 2", '
-#         '"answer_3": "ответ 3", '
-#         '"answer_4": "ответ 4", '
-#         '"correct_answer": тут ключ правильного ответа}'
-#     )
-#     print("Отправили запрос")
-#     response = client.chat.completions.create(
-#         model="gpt-4-turbo",
-#         messages=[{"role": "user", "content": request_text}],
-#     )
-#     print(response.choices[0].message.content)
-#     json_obj = json.loads(response.choices[0].message.content)
-#     return json_obj
-
-questions = [
-    {
-        "question": "text_question_1",
-        "answer_1": "text_answer_1",
-        "answer_2": "text_answer_2",
-        "answer_3": "text_answer_3",
-        "answer_4": "text_answer_4",
-        "correct_answer": "1️⃣",
-    },
-    {
-        "question": "text_question_2",
-        "answer_1": "text_answer_1",
-        "answer_2": "text_answer_2",
-        "answer_3": "text_answer_3",
-        "answer_4": "text_answer_4",
-        "correct_answer": "1️⃣",
-    },
-    {
-        "question": "text_question_3",
-        "answer_1": "text_answer_1",
-        "answer_2": "text_answer_2",
-        "answer_3": "text_answer_3",
-        "answer_4": "text_answer_4",
-        "correct_answer": "1️⃣",
-    },
-    {
-        "question": "text_question_4",
-        "answer_1": "text_answer_1",
-        "answer_2": "text_answer_2",
-        "answer_3": "text_answer_3",
-        "answer_4": "text_answer_4",
-        "correct_answer": "1️⃣",
-    },
-]
-
-
-def get_question():
-    return random.choice(questions)
 
 
 class QuizView(discord.ui.View):
@@ -122,7 +65,7 @@ class QuizView(discord.ui.View):
         self.end_quiz_button.callback = self.end_quiz
 
     async def start_question(self, ctx):
-        self.current_question = get_question()
+        self.current_question = get_gpt_question(self.quiz_topic)
         content = await self._generate_content()
 
         self.msg_content = content
@@ -149,7 +92,7 @@ class QuizView(discord.ui.View):
             await interaction.response.defer()
 
             # Получаем следующий вопрос
-            self.current_question = get_question()
+            self.current_question = get_gpt_question(self.quiz_topic)
             content = await self._generate_content()
 
             # Динамически добавляем кнопки, которые хотим отобразить
@@ -187,10 +130,10 @@ class QuizView(discord.ui.View):
         if not interaction.response.is_done():
             await interaction.response.defer()
 
-        correct_answer = self.current_question["correct_answer"]
-        # correct_answer_content = self.current_question[correct_answer]
-        # correct_answer_emoji = ANSWER_TO_EMOJI[correct_answer]
-        users_correct_answers = self.votes[correct_answer]
+        correct_answer_key = self.current_question["correct_answer"]
+        correct_answer_content = self.current_question[correct_answer_key]
+        correct_answer_emoji = ANSWER_TO_EMOJI[correct_answer_key]
+        users_correct_answers = self.votes[correct_answer_emoji]
 
         for user in users_correct_answers:
             if self.user_correct_answers.get(user):
@@ -202,7 +145,7 @@ class QuizView(discord.ui.View):
         self.add_item(self.next_question_button)
         self.add_item(self.end_quiz_button)
 
-        content = f"Правильный ответ: {correct_answer}"
+        content = f"Правильный ответ: {correct_answer_content}"
         self.msg_content = content
 
         self.message = await interaction.followup.send(content=content, view=self)
@@ -257,6 +200,9 @@ async def on_reaction_add(reaction, user):
     if quiz_view:
         # Проверяем, что реакция добавлена к текущему вопросу и что это не бот добавил реакцию
         if not user.bot and reaction.message.id == msg_reaction_dict.get(quiz_view):
+            if reaction.emoji not in ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]:
+                await reaction.remove(user)
+                return
             # Проверяем, если пользователь уже голосовал
             if user.id in quiz_view.voted_users:
                 # Если реакция другая, удаляем новую реакцию
@@ -323,4 +269,4 @@ async def start(ctx):
         await ctx.send("Время ожидания истекло. Попробуйте снова.")
 
 
-bot.run(os.getenv("TOKEN"))
+bot.run(os.getenv("DS_TOKEN"))
