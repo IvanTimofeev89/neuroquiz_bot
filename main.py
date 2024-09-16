@@ -10,10 +10,10 @@ from gpt_script import get_gpt_question
 load_dotenv()
 
 ANSWER_TO_EMOJI = {
-    "answer_1": "1️⃣",
-    "answer_2": "2️⃣",
-    "answer_3": "3️⃣",
-    "answer_4": "4️⃣",
+    "1": "1️⃣",
+    "2": "2️⃣",
+    "3": "3️⃣",
+    "4": "4️⃣",
 }
 
 intents = discord.Intents.default()
@@ -68,10 +68,20 @@ class QuizView(discord.ui.View):
         try:
             self.current_question = get_gpt_question(self.quiz_topic)
         except Exception as e:
-            await ctx.send(f"Произошла ошибка: {e}.\nЗаканчиваем викторину")
-            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
-            await self.end_quiz(ctx=ctx)
-            return
+            await ctx.send("Не корректная генерация нейросети. Повторяю попытку")
+            trials_counter = 0
+            while not self.current_question or trials_counter < 3:
+                trials_counter += 1
+                try:
+                    self.current_question = get_gpt_question(self.quiz_topic)
+                except Exception:
+                    await ctx.send("Не корректная генерация нейросети. Повторяю попытку")
+                    continue
+            else:
+                await ctx.send(f"{e}.\nЗаканчиваем викторину")
+                await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+                await self.end_quiz(ctx=ctx)
+                return
 
         content = await self._generate_content()
         self.msg_content = content
@@ -207,10 +217,10 @@ class QuizView(discord.ui.View):
     async def _generate_content(self):
         return (
             f"Вопрос: {self.current_question['question']}\n"
-            f"1️⃣ {self.current_question['answer_1']}\n"
-            f"2️⃣ {self.current_question['answer_2']}\n"
-            f"3️⃣ {self.current_question['answer_3']}\n"
-            f"4️⃣ {self.current_question['answer_4']}\n"
+            f"1️⃣ {self.current_question['1']}\n"
+            f"2️⃣ {self.current_question['2']}\n"
+            f"3️⃣ {self.current_question['3']}\n"
+            f"4️⃣ {self.current_question['4']}\n"
         )
 
 
