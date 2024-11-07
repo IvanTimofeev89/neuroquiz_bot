@@ -1,4 +1,6 @@
+import asyncio
 import os
+import time
 
 import discord
 from discord.ext import commands
@@ -48,6 +50,9 @@ class QuizView(discord.ui.View):
             None  # Отдельно сохраняем содержимое сообщения для дальнейшего удаления кнопок
         )
 
+        self.inactivity_task = None  # Новая задача для отслеживания бездействия
+        self.last_interaction_time = None  # Отслеживаем время последнего взаимодействия
+
         # Определяем кнопки отдельно
         self.next_question_button = discord.ui.Button(
             label="Следующий вопрос", style=discord.ButtonStyle.primary
@@ -64,21 +69,32 @@ class QuizView(discord.ui.View):
         )
         self.end_quiz_button.callback = self.end_quiz
 
+    async def start_quiz(self, ctx):
+        # Запускаем викторину и отслеживание бездействия
+        await self.start_question(ctx)
+
     async def start_question(self, ctx):
-        try:
-            self.current_question = get_gpt_question(self.quiz_topic)
-        except Exception as e:
-            await ctx.send("Не корректная генерация нейросети. Повторяю попытку")
+
+        self.current_question = get_gpt_question(self.quiz_topic)
+
+        if not self.current_question:
+            await ctx.send("Не удалось корректно сгенерировать вопрос. Повторяю попытку...")
             trials_counter = 0
-            while not self.current_question or trials_counter < 3:
+
+            while trials_counter < 3:
                 trials_counter += 1
-                try:
-                    self.current_question = get_gpt_question(self.quiz_topic)
-                except Exception:
-                    await ctx.send("Не корректная генерация нейросети. Повторяю попытку")
-                    continue
-            else:
-                await ctx.send(f"{e}.\nЗаканчиваем викторину")
+                time.sleep(0.5)
+                self.current_question = get_gpt_question(self.quiz_topic)
+
+                # Если удалось сгенерировать вопрос, прерываем цикл
+                if self.current_question:
+                    break
+
+            # Если после 3 попыток вопрос так и не сгенерировался
+            if not self.current_question:
+                await ctx.send(
+                    "Не удалось получить корректную генерацию вопроса. Заканчиваем викторину."
+                )
                 await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
                 await self.end_quiz(ctx=ctx)
                 return
@@ -101,20 +117,38 @@ class QuizView(discord.ui.View):
     async def next_question(self, interaction: discord.Interaction):
 
         # Делаем defer взаимодействия, чтобы предотвратить таймауты
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-
-        # Получаем следующий вопрос
-        try:
-            self.current_question = get_gpt_question(self.quiz_topic)
-            content = await self._generate_content()
-        except Exception as e:
-            await interaction.followup.send(f"Произошла ошибка: {e}.\nЗаканчиваем викторину")
-            await self.end_quiz(interaction=interaction)
-            return
+        await interaction.response.defer()
 
         # Очищаем кнопки из предыдущего сообщения
         await self._remove_buttons()
+
+        # Получаем следующий вопрос
+        self.current_question = get_gpt_question(self.quiz_topic)
+
+        if not self.current_question:
+            await interaction.followup.send(
+                "Не удалось корректно сгенерировать вопрос. Повторяю попытку..."
+            )
+            trials_counter = 0
+
+            while trials_counter < 3:
+                trials_counter += 1
+                time.sleep(0.5)
+                self.current_question = get_gpt_question(self.quiz_topic)
+
+                # Если удалось сгенерировать вопрос, прерываем цикл
+                if self.current_question:
+                    break
+
+            # Если после 3 попыток вопрос так и не сгенерировался
+            if not self.current_question:
+                await interaction.followup.send(
+                    "Не удалось получить правильную генерацию вопроса. Заканчиваем викторину"
+                )
+                await self.end_quiz(interaction=interaction)
+                return
+
+        content = await self._generate_content()
 
         # Динамически добавляем кнопки, которые хотим отобразить
         self.add_item(self.correct_answer_button)
@@ -134,12 +168,17 @@ class QuizView(discord.ui.View):
         # Добавляем реакции-эмодзи для голосования
         await self._add_emoji_reaction()
 
-    async def correct_answer(self, interaction: discord.Interaction):
-        # Делаем defer взаимодействия, чтобы предотвратить таймауты
-        if not interaction.response.is_done():
-            await interaction.response.defer()
+    async def correct_answer(self, interaction_or_ctx):
 
-        # Удаляем ID сообщения с реакциями
+        # Делаем defer взаимодействия, чтобы предотвратить таймауты
+        if isinstance(interaction_or_ctx, discord.Interaction):
+            interaction = interaction_or_ctx
+            await interaction.response.defer()
+        else:
+            ctx = interaction_or_ctx
+            interaction = None
+
+            # Удаляем ID сообщения с реакциями
         del msg_reaction_dict[self]
 
         # Очищаем кнопки из предыдущего сообщения
@@ -163,12 +202,21 @@ class QuizView(discord.ui.View):
         content = f"Правильный ответ: {correct_answer_content}"
         self.msg_content = content
 
-        self.message = await interaction.followup.send(content=content, view=self)
+        if interaction:
+            # Если это Interaction, используем followup
+            self.message = await interaction.followup.send(content=content, view=self)
+        else:
+            # Если это Context, отправляем сообщение напрямую
+            self.message = await ctx.send(content=content, view=self)
 
     async def end_quiz(self, interaction: discord.Interaction = None, ctx=None):
+        # Завершаем викторину и отменяем задачи
+        if self.inactivity_task:
+            self.inactivity_task.cancel()
 
         # Удаляем кнопки из предыдущего сообщения
         await self._remove_buttons()
+
         if interaction:
             if self.user_correct_answers:
                 winner_id = max(self.user_correct_answers, key=self.user_correct_answers.get)
@@ -199,9 +247,18 @@ class QuizView(discord.ui.View):
             active_quizzes.pop(ctx.channel.id, None)
 
             # Восстановление прав на отправку сообщений
-            await ctx.channel.set_permissions(
-                ctx.guild.default_role, send_messages=True
-            )  # Сброс прав
+            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+
+    async def _check_inactivity(self, ctx):
+        """
+        Проверяет бездействие. Если 5 минут нет активности, завершает викторину.
+        """
+        while True:
+            await asyncio.sleep(10)  # Проверяем каждые 10 секунд
+            if time.time() - self.last_interaction_time > 60:  # 300 секунд = 5 минут
+                await ctx.send("Викторина завершена из-за отсутствия активности!")
+                await self.end_quiz(ctx=ctx)
+                break
 
     async def _remove_buttons(self):
         self.clear_items()
@@ -289,7 +346,7 @@ async def start(ctx):
         view.quiz_topic = topic
         active_quizzes[ctx.channel.id] = view
 
-        await view.start_question(ctx)
+        await view.start_quiz(ctx)
 
         # Запрещаем всем участникам отправлять сообщения в текущий канал
         await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
